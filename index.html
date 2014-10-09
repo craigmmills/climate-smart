@@ -1,0 +1,296 @@
+<!doctype><html><head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>Odyssey.js Scroll</title>
+  <meta name="description" content="">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="icon" type="image/x-icon" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+  <link rel="icon" type="image/png" href="http://cartodb.github.io/odyssey.js/sandbox/favicon.png">
+
+  <link rel="stylesheet" href="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/themes/css/cartodb.css">
+  <link rel="stylesheet" href="http://cartodb.github.io/odyssey.js/sandbox/css/scroll.css">
+  <script src="http://cartodb.github.io/odyssey.js/vendor/modernizr-2.6.2.min.js"></script>
+</head>
+<body>
+  <div id="layout">
+    <!--<div class="progress-bar"></div>-->
+
+    <div class="inner-header">
+      <div id="header"></div>
+    </div>
+
+    <div id="map_pos">
+      <div id="map_container">
+        <div id="map"></div>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <div id="credits">
+      <span class="title" id="title">Title</span>
+      <span class="author"><b id="author">By Name using</b> <a href="#">Odyssey.js</a><span>
+    </span></span></div>
+  </div> <!-- layout -->
+
+  <script src="http://cartodb-libs.global.ssl.fastly.net/cartodb.js/v3/cartodb.js"></script>
+  <script src="http://cartodb.github.io/odyssey.js/dist/odyssey.js" charset="UTF-8"></script>
+
+  <script>
+    O.Template({
+      init: function() {
+        var baseurl = this.baseurl = 'http://{s}.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+        var map = this.map = L.map('map',{
+          center: [0, 0],
+          zoom: 4
+        });
+
+        this.map.scrollWheelZoom.disable();
+
+        var basemap = this.basemap = L.tileLayer(baseurl, {
+          attribution: 'data OSM - map CartoDB'
+        }).addTo(map);
+
+        var story = O.Story()
+
+        this.story = story;
+        this.miniprogressbar = O.MiniProgressBar();
+
+        // trigger when  map_pos go out of the screen
+        this.edge = O.Edge(
+          O.Triggers.Scroll().less('map_pos').offset(0),
+          O.Triggers.Scroll().greater('map_pos').offset(0)
+        )
+      },
+
+      update: function(actions) {
+        var self = this;
+
+        this.story.clear();
+
+        if (this.baseurl && (this.baseurl !== actions.global.baseurl)) {
+          this.baseurl = actions.global.baseurl || 'http://0.api.cartocdn.com/base-light/{z}/{x}/{y}.png';
+
+          this.basemap.setUrl(this.baseurl);
+        }
+
+        if (this.cartoDBLayer && ("http://"+self.cartoDBLayer.options.user_name+".cartodb.com/api/v2/viz/"+self.cartoDBLayer.options.layer_definition.stat_tag+"/viz.json" !== actions.global.vizjson)) {
+          this.map.removeLayer(this.cartoDBLayer);
+
+          this.cartoDBLayer = null;
+          this.created = false;
+        }
+
+        if (actions.global.vizjson && !this.cartoDBLayer) {
+          if (!this.created) { // sendCode debounce < vis loader
+            cdb.vis.Loader.get(actions.global.vizjson, function(vizjson) {
+              self.map.fitBounds(vizjson.bounds);
+
+              cartodb.createLayer(self.map, vizjson)
+                .done(function(layer) {
+                  self.cartoDBLayer = layer;
+
+                  var sublayer = layer.getSubLayer(0),
+                      layer_name = layer.layers[0].options.layer_name,
+                      filter = actions.global.cartodb_filter ? " WHERE "+actions.global.cartodb_filter : "";
+
+                  sublayer.setSQL("SELECT * FROM "+layer_name+filter)
+
+                  self.map.addLayer(layer);
+
+                  self._resetActions(actions);
+                }).on('error', function(err) {
+                  console.log("some error occurred: " + err);
+                });
+            });
+
+            this.created = true;
+          }
+
+          return;
+        }
+
+        this._resetActions(actions);
+      },
+
+      _resetActions: function(actions) {
+        // update footer title and author
+        var title_ = actions.global.title === undefined ? '' : actions.global.title,
+            author_ = actions.global.author === undefined ? 'Using' : 'By '+actions.global.author+' using';
+
+        document.getElementById('title').innerHTML = title_;
+        document.getElementById('author').innerHTML = author_;
+        document.title = title_ + " | " + author_ +' Odyssey.js';
+
+        var TRIGGER_LINE = this.map.getSize().y + 50;
+        this.story.addEvent(
+          this.edge,
+          O.Parallel(
+            O.Actions.CSS($('#map_container')).toggleClass('attachTop'),
+            O.Actions.CSS($('#content')).toggleClass('attachMap'),
+            O.Actions.Debug().log('attach')
+          )
+        )
+
+        // create content
+        var content = '';
+
+        var slide_ = actions[0];
+        $('#header').html(slide_.html());
+
+        this.story
+          .addState(
+            O.Scroll().within($('#header')),
+            slide_(this)
+          );
+
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          content += "<div id='s_" + i +"'>" + slide.html() + "</div>";
+        }
+
+        $('#content').html(content);
+
+        // first slide is the header, skip it
+        for(var i = 1; i < actions.length; ++i) {
+          var slide = actions[i];
+          this.story.addState(
+            O.Triggers.Scroll().within('s_' + i).offset(TRIGGER_LINE),
+            O.Parallel(
+              slide(this),
+              this.miniprogressbar.percent(100*i/(actions.length - 1))
+            )
+          )
+        }
+
+        if(window.scrollY === 0) {
+          this.story.go(0);
+        }
+      }
+    });
+  </script>
+
+  <script>
+    (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+    (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+    m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+    })(window,document,'script','//www.google-analytics.com/analytics.js','ga');
+
+    ga('create', 'UA-20934186-21', 'cartodb.github.io');
+    ga('send', 'pageview');
+  </script>
+
+
+<script id="md_template" type="text/template">
+
+```
+-baseurl: "http://{s}.tile.stamen.com/watercolor/{z}/{x}/{y}.jpg"
+-title: "Climate-smart, site-specific agriculture"
+-author: "Vizzuality"
+```
+
+#Climate-smart, site-specific agriculture
+```
+- center: [4.570868, -74.297333]
+- zoom: 2
+```
+
+Over the past 10 years, impacts of global warming have started to change our environment. In Latin America, the increased climate variability is challenging farmers as traditional landmarks aren’t useful anymore. Seasons (rains) don’t come at the same time as before and crops experience more extreme climatic events. 
+
+#Columbia
+```
+- center: [4.570868, -74.297333]
+- zoom: 5
+```
+
+As a result, average rice yields in Colombia have dropped (average yield of 6t/ha in irrigated rice before 2009 and in 5t/ha today) and the sector didn’t manage to recover them.
+
+![rice](http://www.aclimatecolombia.org/wp-content/uploads/2014/01/2.jpg)
+
+
+New approaches are required to provide farmers with updated and relevant information so as to support them in the decision making process, and to make them more resilient to climate change.
+
+Analyzing large amounts of commercial harvests records (noisy but numerous) combined to climate data at daily resolution, following the principles of Big Data, we identified main climatic limiting factors in several rice producing areas, and characterized the response to climate of different cultivars. 
+
+We then linked our results to seasonal forecasts to generate recommendation for rice growers in two regions for the end on 2014.
+
+The recommendations are being tested in collaboration with The Colombian Rice Producers Federation which is part of the project. 
+Rice breeders have also shown interest for the results to get feedback on the actual behavior of the cultivars in commercial conditions so as to adjust their breeding strategies.
+
+
+#Saldaña – Purificacion (Tolima) irrigated rice : Catch the solar radiation when it is available
+```
+- center: [3.909434, -74.958549]
+- zoom: 10
+```
+
+In Saldaña, the analysis of 877 production events revealed that the main limiting climatic factor in this region is the amount of solar radiation the rice plant receive in the grain filling stage. This means that all rice crops don’t get sufficient solar radiation in Saldaña: they could produce more. Indeed, for now, farmers sow almost at any time of the year. Adjusting the sowing date, farmers could harvest more rice, taking advantage of the good solar radiation availability around March and august-September
+ 
+
+![people working](http://www.aclimatecolombia.org/wp-content/uploads/2014/01/DSC06728.jpg)
+
+#Villavicencio (Meta) rainfed rice :  Don’t trust the rain any more
+```
+- center: [4.047266, -73.409132]
+- zoom: 10
+```
+
+In Villavicencio, the analysis of 357 production events revealed that the main limiting climatic factor in this region is the distribution (of frequency) of significant rains along the crop cycle.
+
+![Rain](http://www.aclimatecolombia.org/wp-content/uploads/2013/06/PC4.jpg)
+
+Rains are not as regular as they used to be. Now crops can experience heavy rains followed by 20 days without a drop. In this region, FEDEARROZ is now evaluating the infrastructure needed to stock rainwater and implement complementary irrigation by aspersion.
+
+#Monteria-Cerete_Lorica (Cordoba) irrigated rice: It is getting hot
+
+```
+- center: [8.893518, -75.901227]
+- zoom: 10
+```
+
+In Cordoba, the analysis of 626 production events revealed that the main limiting climatic factor in this region is the high night temperatures and the low diurnal temperature range.
+ 
+Farmers should then favor varieties tolerant to high temperatures. But even doing so, it seems that the most tolerant varieties are reaching their limit in this region.
+Breeders are thinking of using those results to adjust their strategies and breed for new varieties adapted to the high temperature conditions of Cordoba
+
+#Villavicencio (Meta) : What about tomorrow?
+
+```
+- center: [4.047266, -73.409132]
+- zoom: 10
+```
+
+In Villavicencio, we classified our data according to the 120 days climate sequences corresponding to each harvest. This enables us to differentiate favorable climate sequences from limited ones for rice cropping.
+
+![Happy Farmer](http://aclimatecolomb.wpengine.com/wp-content/uploads/2013/06/2.jpg)
+
+Matching the groups to a seasonal forecast (4 months) allow us to determine whether farmers should sow, or not (based on historical data recorded under similar conditions), and if yes, which variety would be the most suitable to the forecasted conditions.
+
+#Scaling up
+
+```
+- center: [4.570868, -74.297333]
+- zoom: 3
+```
+
+The approach has the potential to be generalized to other countries and other crops. 
+In the near future, Peru and Nicaragua will start the implementation on rice.
+In Colombia maize and beans are also included in collaboration with the federation of cereals and leguminous growers (FENALCE)
+
+
+![Happy Farmer](http://aclimatecolomb.wpengine.com/wp-content/uploads/2013/06/2.jpg)
+
+
+
+
+
+
+
+
+
+
+
+
+end
+</script></body></html>
